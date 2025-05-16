@@ -145,7 +145,7 @@ fn match_symbol(symbol: &str) -> Kind {
 pub struct Lexer<'a> {
     pub source: &'a str,
     pub chars: Peekable<Chars<'a>>,
-    // chars: Chars<'a>,
+    position: usize,
 }
 
 impl<'a> Lexer<'a> {
@@ -154,6 +154,23 @@ impl<'a> Lexer<'a> {
             source,
             // chars: source.chars(),
             chars: source.chars().peekable(),
+            position: 0,
+        }
+    }
+
+    // 次の文字を見る（消費しない）
+    fn peek(&mut self) -> Option<&char> {
+        self.chars.peek()
+    }
+
+    // 文字を消費するたびにpositionを更新
+    fn next_char(&mut self) -> Option<char> {
+        if let Some(c) = self.chars.next() {
+            // self.position += c.len_utf8(); //マルチバイト文字のときに，オフセットがおかしくなる
+            self.position += 1;
+            Some(c)
+        } else {
+            None
         }
     }
 
@@ -172,21 +189,21 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn read_next_token(&mut self) -> Token {
-        while let Some(c) = self.chars.peek() {
+        while let Some(c) = self.peek() {
             // EBNFのprogramに該当
             match c {
                 // 分離子
                 ' ' | '\t' | '\n' | '\r' | '{' | '/' => {
-                    let c = self.chars.next().unwrap();
+                    let c = self.next_char().unwrap();
                     self.comment(c);
                 }
                 // 字句
                 _ => {
                     let start = self.offset();
                     // peekで存在を確認しているのでunwrapでpanicは起きない
-                    // token()関数の呼び出し元（つまりこの関数）でchars.next()を呼び出すことで，
+                    // token()関数の呼び出し元（つまりこの関数）でnext_char()を呼び出すことで，
                     // unwrap()でpanicが起きる可能性を排除するコードの距離を短くしている
-                    let c = self.chars.next().unwrap();
+                    let c = self.next_char().unwrap();
                     let (kind, value) = self.token(c);
                     let end = self.offset();
 
@@ -217,9 +234,18 @@ impl<'a> Lexer<'a> {
         // イテレータを消費し，Noneを返すまでの要素数を返す
         // ので，count()の計算量はO(n)になると思う
         // ややコストが高めかもしれない
-        self.source.len() - self.chars.clone().count()
+        println!(
+            "a: {}, b: {}, {:?}",
+            self.source.chars().clone().count() - self.chars.clone().count(),
+            self.position,
+            self.chars.clone().peek(),
+        );
+        // // self.source.len() - self.chars.clone().count()
+        // self.source.chars().clone().count() - self.chars.clone().count()
+        self.position
     }
 
+    // コメント周りがおかしくてエラーになる可能性？ コメントの部分をトークン進められていない？
     fn comment(&mut self, c: char) {
         // EBNFのcomment，注釈に該当
         match c {
@@ -233,11 +259,16 @@ impl<'a> Lexer<'a> {
         }
     }
     fn comment_brace(&mut self) {
-        for c in self.chars.by_ref() {
+        while let Some(c) = self.next_char() {
             if c == '}' {
                 break;
             }
         }
+        // for c in self.chars.by_ref() {
+        //     if c == '}' {
+        //         break;
+        //     }
+        // }
     }
 
     fn comment_slashstar(&mut self) {
@@ -247,7 +278,7 @@ impl<'a> Lexer<'a> {
             Other,
         }
         let mut state = State::Slash;
-        for c in self.chars.by_ref() {
+        while let Some(c) = self.next_char() {
             match state {
                 State::Slash => {
                     if c == '*' {
@@ -268,6 +299,27 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
+        // for c in self.chars.by_ref() {
+        //     match state {
+        //         State::Slash => {
+        //             if c == '*' {
+        //                 state = State::Star;
+        //             }
+        //         }
+        //         State::Star => {
+        //             if c == '/' {
+        //                 break;
+        //             } else if c != '*' {
+        //                 state = State::Other;
+        //             }
+        //         }
+        //         State::Other => {
+        //             if c == '*' {
+        //                 state = State::Star;
+        //             }
+        //         }
+        //     }
+        // }
     }
 
     fn token(&mut self, c: char) -> (Kind, TokenValue) {
@@ -286,7 +338,7 @@ impl<'a> Lexer<'a> {
         while let Some(c) = self.chars.peek() {
             match c {
                 'a'..='z' | 'A'..='Z' | '0'..='9' => {
-                    buf.push(self.chars.next().unwrap());
+                    buf.push(self.next_char().unwrap());
                 }
                 _ => {
                     break;
@@ -306,7 +358,7 @@ impl<'a> Lexer<'a> {
         while let Some(c) = self.chars.peek() {
             match c {
                 '0'..='9' => {
-                    buf.push(self.chars.next().unwrap());
+                    buf.push(self.next_char().unwrap());
                 }
                 _ => {
                     break;
@@ -344,7 +396,7 @@ impl<'a> Lexer<'a> {
                     }
                 }
             }
-            buf.push(self.chars.next().unwrap());
+            buf.push(self.next_char().unwrap());
         }
 
         // 最後尾がシングルクォートであれば，取り除く
@@ -373,7 +425,7 @@ impl<'a> Lexer<'a> {
             // if SYMBOLS_LEN_1.contains(&buf.as_str()) {
             //     break;
             // }
-            buf.push(self.chars.next().unwrap());
+            buf.push(self.next_char().unwrap());
         }
 
         let kind = match_symbol(&buf);
@@ -408,7 +460,7 @@ mod tests {
         0 1 9 255 
         {string}
         'string'
-        'string1''string2'
+        'string1''文字列🦀'
         {symbol}
         + - * = <> < <= > >=
         ( ) [ ] := . , : ;
@@ -454,7 +506,7 @@ mod tests {
             (Kind::String, TokenValue::String("string".to_string())),
             (
                 Kind::String,
-                TokenValue::String("string1'string2".to_string()),
+                TokenValue::String("string1'文字列🦀".to_string()),
             ),
             (Kind::Plus, TokenValue::None),
             (Kind::Minus, TokenValue::None),
