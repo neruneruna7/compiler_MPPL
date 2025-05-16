@@ -535,4 +535,22 @@ mod tests {
             assert_eq!(token.value, expected[i].1);
         }
     }
+
+    #[test]
+    fn test_offset() {
+        let source = "abc abc abc";
+        let mut lexer = Lexer::new(source);
+        let lex = lexer.analyze();
+        let ans = vec![
+            (0, 3),
+            (4, 7),
+            (8, 11),
+            (11, 11), // EOF
+        ];
+        eprintln!("{:?}", lex);
+        for (i, token) in lex.iter().enumerate() {
+            assert_eq!(token.start, ans[i].0);
+            assert_eq!(token.end, ans[i].1);
+        }
+    }
 }
