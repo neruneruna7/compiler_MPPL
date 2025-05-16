@@ -199,13 +199,13 @@ impl<'a> Lexer<'a> {
                 }
                 // 字句
                 _ => {
-                    let start = self.offset();
+                    let start = self.position;
                     // peekで存在を確認しているのでunwrapでpanicは起きない
                     // token()関数の呼び出し元（つまりこの関数）でnext_char()を呼び出すことで，
                     // unwrap()でpanicが起きる可能性を排除するコードの距離を短くしている
                     let c = self.next_char().unwrap();
                     let (kind, value) = self.token(c);
-                    let end = self.offset();
+                    let end = self.position;
 
                     return Token {
                         kind,
@@ -216,8 +216,8 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
-        let start = self.offset();
-        let end = self.offset();
+        let start = self.position;
+        let end = self.position;
 
         Token {
             kind: Kind::Eof,
@@ -225,24 +225,6 @@ impl<'a> Lexer<'a> {
             end,
             value: TokenValue::None,
         }
-    }
-
-    fn offset(&self) -> usize {
-        // self.chars.clone().count()の計算量を調べた方がいいかもしれない
-        // self.source.len()は fat pointerによりO(1)だが，後者はO(n)の可能性あり
-
-        // イテレータを消費し，Noneを返すまでの要素数を返す
-        // ので，count()の計算量はO(n)になると思う
-        // ややコストが高めかもしれない
-        println!(
-            "a: {}, b: {}, {:?}",
-            self.source.chars().clone().count() - self.chars.clone().count(),
-            self.position,
-            self.chars.clone().peek(),
-        );
-        // // self.source.len() - self.chars.clone().count()
-        // self.source.chars().clone().count() - self.chars.clone().count()
-        self.position
     }
 
     // コメント周りがおかしくてエラーになる可能性？ コメントの部分をトークン進められていない？
@@ -264,11 +246,6 @@ impl<'a> Lexer<'a> {
                 break;
             }
         }
-        // for c in self.chars.by_ref() {
-        //     if c == '}' {
-        //         break;
-        //     }
-        // }
     }
 
     fn comment_slashstar(&mut self) {
@@ -299,27 +276,6 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
-        // for c in self.chars.by_ref() {
-        //     match state {
-        //         State::Slash => {
-        //             if c == '*' {
-        //                 state = State::Star;
-        //             }
-        //         }
-        //         State::Star => {
-        //             if c == '/' {
-        //                 break;
-        //             } else if c != '*' {
-        //                 state = State::Other;
-        //             }
-        //         }
-        //         State::Other => {
-        //             if c == '*' {
-        //                 state = State::Star;
-        //             }
-        //         }
-        //     }
-        // }
     }
 
     fn token(&mut self, c: char) -> (Kind, TokenValue) {
