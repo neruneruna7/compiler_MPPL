@@ -1,4 +1,9 @@
-use std::{collections::HashSet, iter::Peekable, str::Chars, sync::LazyLock};
+use std::{
+    collections::{HashMap, HashSet},
+    iter::Peekable,
+    str::Chars,
+    sync::LazyLock,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Token {
@@ -81,65 +86,75 @@ static SYMBOLS_LEN_1: LazyLock<HashSet<&str>> = LazyLock::new(|| {
         .collect::<HashSet<&str>>()
 });
 
+/// キーワードとKindの対応を保持するマップを作成
+/// matchで総当たりしてもいいが，こっちの方が速そう
+static KEYWORDS: LazyLock<HashMap<&'static str, Kind>> = LazyLock::new(|| {
+    [
+        ("program", Kind::Program),
+        ("var", Kind::Var),
+        ("array", Kind::Array),
+        ("of", Kind::Of),
+        ("begin", Kind::Begin),
+        ("end", Kind::End),
+        ("if", Kind::If),
+        ("then", Kind::Then),
+        ("else", Kind::Else),
+        ("procedure", Kind::Procedure),
+        ("return", Kind::Return),
+        ("call", Kind::Call),
+        ("while", Kind::While),
+        ("do", Kind::DO),
+        ("not", Kind::Not),
+        ("or", Kind::Or),
+        ("div", Kind::Div),
+        ("and", Kind::And),
+        ("char", Kind::Char),
+        ("integer", Kind::Integer),
+        ("boolean", Kind::Boolean),
+        ("read", Kind::Read),
+        ("write", Kind::Write),
+        ("readln", Kind::Readln),
+        ("writeln", Kind::Writeln),
+        ("true", Kind::True),
+        ("false", Kind::False),
+        ("break", Kind::Break),
+    ]
+    .into_iter()
+    .collect()
+});
+
 fn match_keyword(ident: &str) -> Kind {
-    if ident.len() == 1 || ident.len() > 10 {
-        return Kind::Name;
-    }
-    match ident {
-        "program" => Kind::Program,
-        "var" => Kind::Var,
-        "array" => Kind::Array,
-        "of" => Kind::Of,
-        "begin" => Kind::Begin,
-        "end" => Kind::End,
-        "if" => Kind::If,
-        "then" => Kind::Then,
-        "else" => Kind::Else,
-        "procedure" => Kind::Procedure,
-        "return" => Kind::Return,
-        "call" => Kind::Call,
-        "while" => Kind::While,
-        "do" => Kind::DO,
-        "not" => Kind::Not,
-        "or" => Kind::Or,
-        "div" => Kind::Div,
-        "and" => Kind::And,
-        "char" => Kind::Char,
-        "integer" => Kind::Integer,
-        "boolean" => Kind::Boolean,
-        "read" => Kind::Read,
-        "write" => Kind::Write,
-        "readln" => Kind::Readln,
-        "writeln" => Kind::Writeln,
-        "true" => Kind::True,
-        "false" => Kind::False,
-        "break" => Kind::Break,
-        _ => Kind::Name,
-    }
+    KEYWORDS.get(ident).copied().unwrap_or(Kind::Name)
 }
 
+// 記号とKindの対応を保持するマップを作成
+static SYMBOLS: LazyLock<HashMap<&'static str, Kind>> = LazyLock::new(|| {
+    [
+        ("+", Kind::Plus),
+        ("-", Kind::Minus),
+        ("*", Kind::Star),
+        ("=", Kind::Equal),
+        ("<>", Kind::NotEq),
+        ("<", Kind::Less),
+        ("<=", Kind::LessEq),
+        (">", Kind::Great),
+        (">=", Kind::GreatEq),
+        ("(", Kind::LParen),
+        (")", Kind::RParen),
+        ("[", Kind::LBracket),
+        ("]", Kind::RBracket),
+        (":=", Kind::Assign),
+        (".", Kind::Dot),
+        (",", Kind::Comma),
+        (":", Kind::Colon),
+        (";", Kind::Semicolon),
+    ]
+    .into_iter()
+    .collect()
+});
+
 fn match_symbol(symbol: &str) -> Kind {
-    match symbol {
-        "+" => Kind::Plus,
-        "-" => Kind::Minus,
-        "*" => Kind::Star,
-        "=" => Kind::Equal,
-        "<>" => Kind::NotEq,
-        "<" => Kind::Less,
-        "<=" => Kind::LessEq,
-        ">" => Kind::Great,
-        ">=" => Kind::GreatEq,
-        "(" => Kind::LParen,
-        ")" => Kind::RParen,
-        "[" => Kind::LBracket,
-        "]" => Kind::RBracket,
-        ":=" => Kind::Assign,
-        "." => Kind::Dot,
-        "," => Kind::Comma,
-        ":" => Kind::Colon,
-        ";" => Kind::Semicolon,
-        _ => Kind::Unknown,
-    }
+    SYMBOLS.get(symbol).copied().unwrap_or(Kind::Unknown)
 }
 
 pub struct Lexer<'a> {
