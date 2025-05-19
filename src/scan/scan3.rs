@@ -17,7 +17,7 @@ pub struct Token {
 pub enum TokenValue {
     None,
     Integer(u32),
-    String(String),
+    String(Vec<char>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -78,17 +78,34 @@ pub enum Kind {
     Unknown,
 }
 
-// 記号のトークンについて1文字のみの記号か，2文字以上の可能性がある記号かを保持する
-// つまり，最初の文字を読んだ段階で確定できるものを集めた配列
-static SYMBOLS_LEN_1: LazyLock<HashSet<&str>> = LazyLock::new(|| {
-    vec!["+", "-", "*", "=", "(", ")", "[", "]", ".", ",", ";"]
-        .into_iter()
-        .collect::<HashSet<&str>>()
-});
+// // 記号のトークンについて1文字のみの記号か，2文字以上の可能性がある記号かを保持する
+// // つまり，最初の文字を読んだ段階で確定できるものを集めた配列
+// static SYMBOLS_LEN_1: LazyLock<HashSet<Vec<char>>> = LazyLock::new(|| {
+//     [
+//         str_to_vec("+"),
+//         str_to_vec("-"),
+//         str_to_vec("*"),
+//         str_to_vec("="),
+//         str_to_vec("("),
+//         str_to_vec(")"),
+//         str_to_vec("["),
+//         str_to_vec("]"),
+//         str_to_vec("."),
+//         str_to_vec(","),
+//         str_to_vec(";"),
+//     ]
+//     .into_iter()
+//     .collect()
+// });
+
+/// 文字列からベクタへの変換ヘルパー
+fn str_to_vec(s: &str) -> Vec<char> {
+    s.chars().collect()
+}
 
 /// キーワードとKindの対応を保持するマップを作成
 /// matchで総当たりしてもいいが，こっちの方が速そう
-static KEYWORDS: LazyLock<HashMap<&'static str, Kind>> = LazyLock::new(|| {
+static KEYWORDS: LazyLock<HashMap<Vec<char>, Kind>> = LazyLock::new(|| {
     [
         ("program", Kind::Program),
         ("var", Kind::Var),
@@ -120,15 +137,16 @@ static KEYWORDS: LazyLock<HashMap<&'static str, Kind>> = LazyLock::new(|| {
         ("break", Kind::Break),
     ]
     .into_iter()
+    .map(|(k, v)| (k.chars().collect(), v))
     .collect()
 });
 
-fn match_keyword(ident: &str) -> Kind {
+fn match_keyword(ident: &[char]) -> Kind {
     KEYWORDS.get(ident).copied().unwrap_or(Kind::Name)
 }
 
 // 記号とKindの対応を保持するマップを作成
-static SYMBOLS: LazyLock<HashMap<&'static str, Kind>> = LazyLock::new(|| {
+static SYMBOLS: LazyLock<HashMap<Vec<char>, Kind>> = LazyLock::new(|| {
     [
         ("+", Kind::Plus),
         ("-", Kind::Minus),
@@ -150,10 +168,11 @@ static SYMBOLS: LazyLock<HashMap<&'static str, Kind>> = LazyLock::new(|| {
         (";", Kind::Semicolon),
     ]
     .into_iter()
+    .map(|(k, v)| (k.chars().collect(), v))
     .collect()
 });
 
-fn match_symbol(symbol: &str) -> Kind {
+fn match_symbol(symbol: &[char]) -> Kind {
     SYMBOLS.get(symbol).copied().unwrap_or(Kind::Unknown)
 }
 
@@ -305,12 +324,13 @@ impl<'a> Lexer<'a> {
     }
 
     fn name_keyword(&mut self, c: char) -> (Kind, TokenValue) {
-        let mut buf = String::from(c);
+        let mut buf = vec![c];
 
         while let Some(c) = self.chars.peek() {
             match c {
                 'a'..='z' | 'A'..='Z' | '0'..='9' => {
-                    buf.push(self.next_char().unwrap());
+                    buf.push(*c);
+                    self.next_char();
                 }
                 _ => {
                     break;
@@ -325,22 +345,25 @@ impl<'a> Lexer<'a> {
     }
 
     fn unsigned_integer(&mut self, c: char) -> (Kind, TokenValue) {
-        let mut buf = String::from(c);
+        let mut buf = vec![c];
 
         while let Some(c) = self.chars.peek() {
             match c {
                 '0'..='9' => {
-                    buf.push(self.next_char().unwrap());
+                    buf.push(*c);
+                    self.next_char();
                 }
                 _ => {
                     break;
                 }
             }
         }
-        (
-            Kind::UnsignedInteger,
-            TokenValue::Integer(buf.parse().unwrap()),
-        )
+
+        // Vec<char>からu32に変換
+        let num_str: String = buf.iter().collect();
+        let num = num_str.parse().unwrap();
+
+        (Kind::UnsignedInteger, TokenValue::Integer(num))
     }
 
     fn string(&mut self) -> (Kind, TokenValue) {
@@ -349,7 +372,8 @@ impl<'a> Lexer<'a> {
             Other,
         }
         let mut state = State::Other;
-        let mut buf = String::new();
+        let mut buf = Vec::new();
+
         while let Some(c) = self.chars.peek() {
             match state {
                 State::Other => {
@@ -368,11 +392,12 @@ impl<'a> Lexer<'a> {
                     }
                 }
             }
-            buf.push(self.next_char().unwrap());
+            buf.push(*c);
+            self.next_char();
         }
 
         // 最後尾がシングルクォートであれば，取り除く
-        if buf.ends_with('\'') {
+        if let Some('\'') = buf.last() {
             buf.pop();
         }
 
@@ -380,7 +405,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn symbol(&mut self, c: char) -> (Kind, TokenValue) {
-        let mut buf = String::from(c);
+        let mut buf = vec![c];
 
         // 現在のバッファ + 次の文字で有効な記号になるか確認
         if let Some(&next_c) = self.chars.peek() {
@@ -388,20 +413,19 @@ impl<'a> Lexer<'a> {
             temp_buf.push(next_c);
 
             // 2文字の組み合わせが有効な記号であれば、次の文字も読み込む
-            if let Some(&kind) = SYMBOLS.get(temp_buf.as_str()) {
+            if let Some(&kind) = SYMBOLS.get(&temp_buf) {
                 self.next_char(); // 次の文字を消費
                 buf.push(next_c);
                 return (kind, TokenValue::None);
             }
         }
-        let a = 1;
 
         // 1文字だけで完結する記号の場合
         let kind = match_symbol(&buf);
         if kind != Kind::Unknown {
             (kind, TokenValue::None)
         } else {
-            // 不明な記号の場合、単にStringとして返す
+            // 不明な記号の場合、単にVec<char>として返す
             (Kind::Unknown, TokenValue::String(buf))
         }
     }
@@ -439,8 +463,11 @@ mod tests {
         let tokens = lexer.analyze();
 
         let expected = vec![
-            (Kind::Name, TokenValue::String("name1".to_string())),
-            (Kind::Name, TokenValue::String("name2name3".to_string())),
+            (Kind::Name, TokenValue::String("name1".chars().collect())),
+            (
+                Kind::Name,
+                TokenValue::String("name2name3".chars().collect()),
+            ),
             (Kind::Program, TokenValue::None),
             (Kind::Var, TokenValue::None),
             (Kind::Array, TokenValue::None),
@@ -473,10 +500,10 @@ mod tests {
             (Kind::UnsignedInteger, TokenValue::Integer(1)),
             (Kind::UnsignedInteger, TokenValue::Integer(9)),
             (Kind::UnsignedInteger, TokenValue::Integer(255)),
-            (Kind::String, TokenValue::String("string".to_string())),
+            (Kind::String, TokenValue::String("string".chars().collect())),
             (
                 Kind::String,
-                TokenValue::String("string1'文字列🦀".to_string()),
+                TokenValue::String("string1'文字列🦀".chars().collect()),
             ),
             (Kind::Plus, TokenValue::None),
             (Kind::Minus, TokenValue::None),
