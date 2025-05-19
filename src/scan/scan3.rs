@@ -78,31 +78,6 @@ pub enum Kind {
     Unknown,
 }
 
-// // 記号のトークンについて1文字のみの記号か，2文字以上の可能性がある記号かを保持する
-// // つまり，最初の文字を読んだ段階で確定できるものを集めた配列
-// static SYMBOLS_LEN_1: LazyLock<HashSet<Vec<char>>> = LazyLock::new(|| {
-//     [
-//         str_to_vec("+"),
-//         str_to_vec("-"),
-//         str_to_vec("*"),
-//         str_to_vec("="),
-//         str_to_vec("("),
-//         str_to_vec(")"),
-//         str_to_vec("["),
-//         str_to_vec("]"),
-//         str_to_vec("."),
-//         str_to_vec(","),
-//         str_to_vec(";"),
-//     ]
-//     .into_iter()
-//     .collect()
-// });
-
-/// 文字列からベクタへの変換ヘルパー
-fn str_to_vec(s: &str) -> Vec<char> {
-    s.chars().collect()
-}
-
 /// キーワードとKindの対応を保持するマップを作成
 /// matchで総当たりしてもいいが，こっちの方が速そう
 static KEYWORDS: LazyLock<HashMap<Vec<char>, Kind>> = LazyLock::new(|| {
@@ -212,7 +187,7 @@ impl<'a> Lexer<'a> {
     pub fn analyze(&mut self) -> Vec<Token> {
         let mut token_vec = Vec::new();
         loop {
-            let token = self.read_next_token();
+            let token = self.next_token();
             if token.kind == Kind::Eof {
                 token_vec.push(token);
                 break;
@@ -223,7 +198,7 @@ impl<'a> Lexer<'a> {
         token_vec
     }
 
-    pub fn read_next_token(&mut self) -> Token {
+    pub fn next_token(&mut self) -> Token {
         while let Some(c) = self.peek() {
             // EBNFのprogramに該当
             match c {
