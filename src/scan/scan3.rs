@@ -181,7 +181,8 @@ impl<'a> Lexer<'a> {
     // 文字を消費するたびにpositionを更新
     fn next_char(&mut self) -> Option<char> {
         if let Some(c) = self.chars.next() {
-            // self.position += c.len_utf8(); //マルチバイト文字のときに，オフセットがおかしくなる
+            // self.position += c.len_utf8(); //マルチバイト文字のときに，オフセットがおかしくなるのでこれはだめ
+            // あくまで文字数を見ている
             self.position += 1;
             Some(c)
         } else {
@@ -381,29 +382,27 @@ impl<'a> Lexer<'a> {
     fn symbol(&mut self, c: char) -> (Kind, TokenValue) {
         let mut buf = String::from(c);
 
-        while let Some(c) = self.chars.peek() {
-            // 1文字目の段階で確定する記号があるので，その場合break
-            if SYMBOLS_LEN_1.contains(&buf.as_str()) {
-                break;
-            }
-            let cc = String::from(*c);
-            if match_symbol(&cc) == Kind::Unknown {
-                break;
-            }
-            // // 1文字目の段階で確定する記号があるので，その場合break
-            // ここにこの処理を置いていたとき，なぜかレキサーのテストケースは通過する
-            // パーサーのテストでは，:=を: と字句解析して異常を起こしたのに なぜ差があるのか不明
-            // if SYMBOLS_LEN_1.contains(&buf.as_str()) {
-            //     break;
-            // }
-            buf.push(self.next_char().unwrap());
-        }
+        // 現在のバッファ + 次の文字で有効な記号になるか確認
+        if let Some(&next_c) = self.chars.peek() {
+            let mut temp_buf = buf.clone();
+            temp_buf.push(next_c);
 
+            // 2文字の組み合わせが有効な記号であれば、次の文字も読み込む
+            if let Some(&kind) = SYMBOLS.get(temp_buf.as_str()) {
+                self.next_char(); // 次の文字を消費
+                buf.push(next_c);
+                return (kind, TokenValue::None);
+            }
+        }
+        let a = 1;
+
+        // 1文字だけで完結する記号の場合
         let kind = match_symbol(&buf);
         if kind != Kind::Unknown {
             (kind, TokenValue::None)
         } else {
-            (kind, TokenValue::String(buf))
+            // 不明な記号の場合、単にStringとして返す
+            (Kind::Unknown, TokenValue::String(buf))
         }
     }
 }
