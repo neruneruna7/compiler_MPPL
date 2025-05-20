@@ -111,10 +111,6 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn position(&self) -> usize {
-        self.position
-    }
-
     // 次の文字を見る（消費しない）
     fn peek(&mut self) -> Option<&char> {
         self.chars.peek()
@@ -174,8 +170,6 @@ impl<'a> Lexer<'a> {
         // ここでは，{ comment } または /* comment */ の部分を無視する
         // ただし，コメントの内容は収集しておく
         while let Some(c) = self.peek() {
-            dbg!("{:?}", c);
-
             match c {
                 ' ' | '\t' | '\n' | '\r' => {
                     // ホワイトスペースはスキップ
@@ -349,43 +343,85 @@ impl<'a> Lexer<'a> {
     }
 
     fn string(&mut self) -> Option<Token> {
+        #[derive(Debug, PartialEq)]
         enum State {
-            SingleQuote,
-            Other,
+            Start,    // S0
+            InString, // S1
+            Quote,    // S2
+            Accept,   // 終了受理状態
+            Reject,   // 不正な文字列
         }
-        let mut state = State::Other;
-        let mut buf = Vec::new();
+        use State::*;
 
+        fn is_string_char(c: char) -> bool {
+            c != '\'' && c != '\n'
+        }
+
+        let mut state = Start;
         let start = self.position;
-        while let Some(c) = self.chars.peek() {
-            match state {
-                State::Other => {
-                    if c == &'\'' {
-                        state = State::SingleQuote;
-                    }
-                }
-                State::SingleQuote => {
-                    if c == &'\'' {
-                        state = State::Other;
-                        // 文字列中のシングルクォートは，2つで1つのシングルクォートとして扱う
-                        // そのため，ここで1つ目のシングルクォートを取り除く
-                        buf.pop();
-                    } else {
-                        break;
-                    }
-                }
-            }
-            buf.push(*c);
-            self.next_char();
-        }
-        let end = self.position;
 
-        Some(Token {
-            kind: Kind::String,
-            start,
-            end,
-            value: TokenValue::String(buf),
-        })
+        while let Some(&c) = self.peek() {
+            match state {
+                Start => {
+                    if c == '\'' {
+                        self.next_char();
+                        state = InString;
+                    } else {
+                        return None;
+                    }
+                }
+
+                InString => {
+                    if is_string_char(c) {
+                        self.next_char(); // 任意の文字列要素
+                                          // stay in InString
+                    } else if c == '\'' {
+                        self.next_char(); // シングルクォート
+                        state = Quote;
+                    } else {
+                        return None; // 改行など無効
+                    }
+                }
+
+                Quote => {
+                    if let Some(&next_c) = self.peek() {
+                        if next_c == '\'' {
+                            // '' → シングルクォートのエスケープ
+                            self.next_char(); // 次のシングルクォートを消費
+                            state = InString;
+                        } else {
+                            // 2つ目がない → 文字列終端とみなす
+                            state = Accept;
+                        }
+                    } else {
+                        // 入力終端 → 終了
+                        state = Accept;
+                    }
+                }
+
+                Accept => {
+                    // 入力が完全に終わっていれば受理
+                    break;
+                }
+
+                Reject => return None,
+            }
+        }
+
+        // 最後にAccept状態にいればOK
+        if state == State::Accept {
+            let end = self.position;
+            let buf: Vec<char> = self.source.chars().skip(start).take(end - start).collect();
+            Some(Token {
+                kind: Kind::String,
+                start,
+                end,
+                value: TokenValue::String(buf),
+            })
+        } else {
+            // 受理できない状態で終了
+            None
+        }
     }
 
     fn symbol(&mut self) -> Option<Token> {
@@ -493,6 +529,34 @@ mod tests {
                 end: 13,
                 value: TokenValue::String("comment".chars().collect())
             })
+        );
+    }
+
+    #[test]
+    fn test_string() {
+        let source = "'string'";
+        //  'string1''文字列🦀'
+        let mut lexer = Lexer::new(source);
+        let token = lexer.string().unwrap();
+        assert_eq!(
+            token,
+            Token {
+                kind: Kind::String,
+                start: 0,
+                end: 8,
+                value: TokenValue::String("'string'".chars().collect()),
+            }
+        );
+
+        let token = lexer.string().unwrap();
+        assert_eq!(
+            token,
+            Token {
+                kind: Kind::String,
+                start: 9,
+                end: 24,
+                value: TokenValue::String("'string1'文字列🦀".chars().collect()),
+            }
         );
     }
 
