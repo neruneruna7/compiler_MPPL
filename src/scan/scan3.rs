@@ -111,6 +111,10 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    fn position(&self) -> usize {
+        self.position
+    }
+
     // 次の文字を見る（消費しない）
     fn peek(&mut self) -> Option<&char> {
         self.chars.peek()
@@ -166,7 +170,22 @@ impl<'a> Lexer<'a> {
 
     /// EBNFのseparatorに該当
     fn separator(&mut self) -> Option<Token> {
-        todo!()
+        // { comment } または /* comment */ を処理する有限オートマトン
+        // ここでは，{ comment } または /* comment */ の部分を無視する
+        // ただし，コメントの内容は収集しておく
+        while let Some(c) = self.peek() {
+            dbg!("{:?}", c);
+
+            match c {
+                ' ' | '\t' | '\n' | '\r' => {
+                    // ホワイトスペースはスキップ
+                    self.next_char();
+                }
+                '{' | '/' => return self.comment(),
+                _ => unreachable!(),
+            }
+        }
+        None
     }
     fn comment(&mut self) -> Option<Token> {
         // { comment } または /* comment */ を処理する有限オートマトン
@@ -184,16 +203,13 @@ impl<'a> Lexer<'a> {
 
         while let Some(c) = self.next_char() {
             match state {
-                State::Initial => {
-                    match c {
-                        '{' => state = State::Brace,
-                        '/' => state = State::Slash,
-                        ' ' | '\t' | '\n' | '\r' => (), // ホワイトスペースは無視
-                        _ => {
-                            unreachable!()
-                        }
+                State::Initial => match c {
+                    '{' => state = State::Brace,
+                    '/' => state = State::Slash,
+                    _ => {
+                        unreachable!()
                     }
-                }
+                },
                 State::Brace => {
                     if c == '}' {
                         // 波括弧コメントの終了 - コメントを処理完了
@@ -246,36 +262,7 @@ impl<'a> Lexer<'a> {
         // ファイル終端に達した場合（適切に閉じられていないコメント）
         // 未閉じのコメントはエラーとして扱う
         None
-    } // fn comment_slashstar(&mut self) {
-      //     enum State {
-      //         Slash,
-      //         Star,
-      //         Other,
-      //     }
-      //     let mut state = State::Slash;
-      //     while let Some(c) = self.next_char() {
-      //         match state {
-      //             State::Slash => {
-      //                 if c == '*' {
-      //                     state = State::Star;
-      //                 }
-      //             }
-      //             State::Star => {
-      //                 if c == '/' {
-      //                     break;
-      //                 } else if c != '*' {
-      //                     state = State::Other;
-      //                 }
-      //             }
-      //             State::Other => {
-      //                 if c == '*' {
-      //                     state = State::Star;
-      //                 }
-      //             }
-      //         }
-      //     }
-      // }
-
+    }
     /// EBNFのtoken，字句に該当
     fn token(&mut self) -> Option<Token> {
         let start = self.position;
@@ -456,6 +443,8 @@ mod tests {
 
     #[test]
     fn test_comment1() {
+        // 実際はコメントはトークンにならない仕様だが，試験的にトークンにしている
+
         let source = "{ comment }";
         let mut lexer = Lexer::new(source);
         let token = lexer.comment().unwrap();
@@ -479,6 +468,31 @@ mod tests {
         assert_eq!(
             token.value,
             TokenValue::String(" comment ".chars().collect())
+        );
+    }
+    #[test]
+    fn test_separator1() {
+        let source = " \t\n\r";
+        let mut lexer = Lexer::new(source);
+        let token = lexer.separator();
+        assert_eq!(token, None);
+        assert_eq!(lexer.position, 4);
+    }
+
+    #[test]
+    fn test_separator2() {
+        let source = " \t\n\r{comment}\r";
+        let mut lexer = Lexer::new(source);
+        // 最初の4文字と最後の1文字はスキップされる
+        let token = lexer.separator();
+        assert_eq!(
+            token,
+            Some(Token {
+                kind: Kind::Unknown,
+                start: 4,
+                end: 13,
+                value: TokenValue::String("comment".chars().collect())
+            })
         );
     }
 
