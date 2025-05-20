@@ -199,8 +199,15 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn next_token(&mut self) -> Token {
+        self.program()
+    }
+
+    /// EBNFのprogramに該当
+    fn program(&mut self) -> Token {
+        // EBNFのprogramに該当
         while let Some(c) = self.peek() {
             // EBNFのprogramに該当
+            // -> program相当ならそういう風に関数切り出せ
             match c {
                 // 分離子
                 ' ' | '\t' | '\n' | '\r' | '{' | '/' => {
@@ -238,8 +245,8 @@ impl<'a> Lexer<'a> {
     }
 
     // コメント周りがおかしくてエラーになる可能性？ コメントの部分をトークン進められていない？
+    /// EBNFのcomment，注釈に該当
     fn comment(&mut self, c: char) {
-        // EBNFのcomment，注釈に該当
         match c {
             '{' => {
                 self.comment_brace();
@@ -288,8 +295,8 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// EBNFのtoken，字句に該当
     fn token(&mut self, c: char) -> (Kind, TokenValue) {
-        // EBNFのtoken，字句に該当
         match c {
             'a'..='z' | 'A'..='Z' => self.name_keyword(c),
             '0'..='9' => self.unsigned_integer(c),
