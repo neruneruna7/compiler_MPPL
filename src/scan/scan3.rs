@@ -142,11 +142,11 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn next_token(&mut self) -> Option<Token> {
-        Some(self.program())
+        self.program()
     }
 
     /// EBNFのprogramに該当
-    fn program(&mut self) -> Token {
+    fn program(&mut self) -> Option<Token> {
         // EBNFのprogramに該当
         while let Some(c) = self.peek() {
             // EBNFのprogramに該当
@@ -157,33 +157,10 @@ impl<'a> Lexer<'a> {
                     self.separator();
                 }
                 // 字句
-                _ => {
-                    let start = self.position;
-                    // peekで存在を確認しているのでunwrapでpanicは起きない
-                    // token()関数の呼び出し元（つまりこの関数）でnext_char()を呼び出すことで，
-                    // unwrap()でpanicが起きる可能性を排除するコードの距離を短くしている
-                    let c = self.next_char().unwrap();
-                    let (kind, value) = self.token(c);
-                    let end = self.position;
-
-                    return Token {
-                        kind,
-                        start,
-                        end,
-                        value,
-                    };
-                }
+                _ => return self.token(),
             }
         }
-        let start = self.position;
-        let end = self.position;
-
-        Token {
-            kind: Kind::Eof,
-            start,
-            end,
-            value: TokenValue::None,
-        }
+        None
     }
 
     fn separator(&mut self) -> Token {
@@ -252,13 +229,22 @@ impl<'a> Lexer<'a> {
     }
 
     /// EBNFのtoken，字句に該当
-    fn token(&mut self, c: char) -> (Kind, TokenValue) {
-        match c {
+    fn token(&mut self) -> Option<Token> {
+        let start = self.position;
+        let c = self.next_char().unwrap();
+        let (k, t) = match c {
             'a'..='z' | 'A'..='Z' => self.name_keyword(c),
             '0'..='9' => self.unsigned_integer(c),
             '\'' => self.string(),
             _ => self.symbol(c),
-        }
+        };
+        let end = self.position;
+        Some(Token {
+            kind: k,
+            start,
+            end,
+            value: t,
+        })
     }
 
     fn name_keyword(&mut self, c: char) -> (Kind, TokenValue) {
