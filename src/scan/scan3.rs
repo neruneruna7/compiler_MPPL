@@ -27,6 +27,7 @@ pub enum Kind {
     UnsignedInt,
     String,
     Symbol,
+    Unknown,
 }
 
 /// キーワードとKindの対応を保持するマップを作成
@@ -166,11 +167,26 @@ impl<'a> Lexer<'a> {
     fn separator(&mut self) -> Token {
         // EBNFのseparatorに該当
         let start = self.position;
-        let c = self.next_char().unwrap();
-        self.comment(c);
+        loop {
+            let c = self.next_char().unwrap();
+            match c {
+                ' ' | '\t' | '\n' | '\r' => {
+                    // 空白，タブ，改行はスキップ
+                    continue;
+                }
+                '{' | '/' => {
+                    // コメント
+                    self.comment(c);
+                    break;
+                }
+                _ => {
+                    unreachable!()
+                }
+            }
+        }
         let end = self.position;
         Token {
-            kind: Kind::Separator,
+            kind: Kind::Unknown,
             start,
             end,
             value: TokenValue::None,
@@ -231,23 +247,21 @@ impl<'a> Lexer<'a> {
     /// EBNFのtoken，字句に該当
     fn token(&mut self) -> Option<Token> {
         let start = self.position;
-        let c = self.next_char().unwrap();
-        let (k, t) = match c {
-            'a'..='z' | 'A'..='Z' => self.name_keyword(c),
-            '0'..='9' => self.unsigned_integer(c),
+        let c = self.peek().unwrap();
+        let t = match c {
+            'a'..='z' | 'A'..='Z' => self.name_keyword(),
+            '0'..='9' => self.unsigned_integer(),
             '\'' => self.string(),
-            _ => self.symbol(c),
+            _ => self.symbol(),
         };
         let end = self.position;
-        Some(Token {
-            kind: k,
-            start,
-            end,
-            value: t,
-        })
+        t
     }
 
-    fn name_keyword(&mut self, c: char) -> (Kind, TokenValue) {
+    /// 名前またはキーワードを取得
+    fn name_keyword(&mut self) -> Option<Token> {
+        let start = self.position;
+        let c = self.next_char().unwrap();
         let mut buf = vec![c];
 
         while let Some(c) = self.chars.peek() {
@@ -263,12 +277,31 @@ impl<'a> Lexer<'a> {
         }
         let kind = match_keyword(&buf);
         match kind {
-            Kind::Name => (kind, TokenValue::String(buf)),
-            _ => (kind, TokenValue::None),
+            Some(k) => {
+                let end = self.position;
+                Some(Token {
+                    kind: k,
+                    start,
+                    end,
+                    value: TokenValue::None,
+                })
+            }
+            None => {
+                // キーワードでなければ識別子
+                let end = self.position;
+                Some(Token {
+                    kind: Kind::Name,
+                    start,
+                    end,
+                    value: TokenValue::String(buf),
+                })
+            }
         }
     }
 
-    fn unsigned_integer(&mut self, c: char) -> (Kind, TokenValue) {
+    fn unsigned_integer(&mut self) -> Option<Token> {
+        let start = self.position;
+        let c = self.next_char().unwrap();
         let mut buf = vec![c];
 
         while let Some(c) = self.chars.peek() {
@@ -282,15 +315,21 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
+        let end = self.position;
 
         // Vec<char>からu32に変換
         let num_str: String = buf.iter().collect();
         let num = num_str.parse().unwrap();
 
-        (Kind::UnsignedInteger, TokenValue::Integer(num))
+        Some(Token {
+            kind: Kind::UnsignedInt,
+            start,
+            end,
+            value: TokenValue::Integer(num),
+        })
     }
 
-    fn string(&mut self) -> (Kind, TokenValue) {
+    fn string(&mut self) -> Option<Token> {
         enum State {
             SingleQuote,
             Other,
@@ -298,6 +337,7 @@ impl<'a> Lexer<'a> {
         let mut state = State::Other;
         let mut buf = Vec::new();
 
+        let start = self.position;
         while let Some(c) = self.chars.peek() {
             match state {
                 State::Other => {
@@ -319,16 +359,19 @@ impl<'a> Lexer<'a> {
             buf.push(*c);
             self.next_char();
         }
+        let end = self.position;
 
-        // 最後尾がシングルクォートであれば，取り除く
-        if let Some('\'') = buf.last() {
-            buf.pop();
-        }
-
-        (Kind::String, TokenValue::String(buf))
+        Some(Token {
+            kind: Kind::String,
+            start,
+            end,
+            value: TokenValue::String(buf),
+        })
     }
 
-    fn symbol(&mut self, c: char) -> (Kind, TokenValue) {
+    fn symbol(&mut self) -> Option<Token> {
+        let start = self.position;
+        let c = self.next_char().unwrap();
         let mut buf = vec![c];
 
         // 現在のバッファ + 次の文字で有効な記号になるか確認
@@ -337,20 +380,40 @@ impl<'a> Lexer<'a> {
             temp_buf.push(next_c);
 
             // 2文字の組み合わせが有効な記号であれば、次の文字も読み込む
-            if let Some(&kind) = SYMBOLS.get(&temp_buf) {
+            // if let Some(_) = SYMBOLS.get(&temp_buf) {
+            if SYMBOLS.contains(&temp_buf) {
                 self.next_char(); // 次の文字を消費
                 buf.push(next_c);
-                return (kind, TokenValue::None);
+                let end = self.position;
+                return Some(Token {
+                    kind: Kind::Symbol,
+                    start,
+                    end,
+                    value: TokenValue::None,
+                });
             }
         }
 
         // 1文字だけで完結する記号の場合
         let kind = match_symbol(&buf);
-        if kind != Kind::Unknown {
-            (kind, TokenValue::None)
-        } else {
-            // 不明な記号の場合、単にVec<char>として返す
-            (Kind::Unknown, TokenValue::String(buf))
+        let end = self.position;
+        match kind {
+            Some(k) => Some(Token {
+                kind: k,
+                start,
+                end,
+                value: TokenValue::None,
+            }),
+            None => {
+                // 1文字だけでは有効な記号にならない場合
+                // ここではUnknownとして扱う
+                Some(Token {
+                    kind: Kind::Unknown,
+                    start,
+                    end,
+                    value: TokenValue::String(buf),
+                })
+            }
         }
     }
 }
@@ -392,62 +455,61 @@ mod tests {
                 Kind::Name,
                 TokenValue::String("name2name3".chars().collect()),
             ),
-            (Kind::Program, TokenValue::None),
-            (Kind::Var, TokenValue::None),
-            (Kind::Array, TokenValue::None),
-            (Kind::Of, TokenValue::None),
-            (Kind::Begin, TokenValue::None),
-            (Kind::End, TokenValue::None),
-            (Kind::If, TokenValue::None),
-            (Kind::Then, TokenValue::None),
-            (Kind::Else, TokenValue::None),
-            (Kind::Procedure, TokenValue::None),
-            (Kind::Return, TokenValue::None),
-            (Kind::Call, TokenValue::None),
-            (Kind::While, TokenValue::None),
-            (Kind::DO, TokenValue::None),
-            (Kind::Not, TokenValue::None),
-            (Kind::Or, TokenValue::None),
-            (Kind::Div, TokenValue::None),
-            (Kind::And, TokenValue::None),
-            (Kind::Char, TokenValue::None),
-            (Kind::Integer, TokenValue::None),
-            (Kind::Boolean, TokenValue::None),
-            (Kind::Read, TokenValue::None),
-            (Kind::Write, TokenValue::None),
-            (Kind::Readln, TokenValue::None),
-            (Kind::Writeln, TokenValue::None),
-            (Kind::True, TokenValue::None),
-            (Kind::False, TokenValue::None),
-            (Kind::Break, TokenValue::None),
-            (Kind::UnsignedInteger, TokenValue::Integer(0)),
-            (Kind::UnsignedInteger, TokenValue::Integer(1)),
-            (Kind::UnsignedInteger, TokenValue::Integer(9)),
-            (Kind::UnsignedInteger, TokenValue::Integer(255)),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::None),
+            (Kind::Keyword, TokenValue::Integer(0)),
+            (Kind::Keyword, TokenValue::Integer(1)),
+            (Kind::Keyword, TokenValue::Integer(9)),
+            (Kind::Keyword, TokenValue::Integer(255)),
             (Kind::String, TokenValue::String("string".chars().collect())),
             (
                 Kind::String,
                 TokenValue::String("string1'文字列🦀".chars().collect()),
             ),
-            (Kind::Plus, TokenValue::None),
-            (Kind::Minus, TokenValue::None),
-            (Kind::Star, TokenValue::None),
-            (Kind::Equal, TokenValue::None),
-            (Kind::NotEq, TokenValue::None),
-            (Kind::Less, TokenValue::None),
-            (Kind::LessEq, TokenValue::None),
-            (Kind::Great, TokenValue::None),
-            (Kind::GreatEq, TokenValue::None),
-            (Kind::LParen, TokenValue::None),
-            (Kind::RParen, TokenValue::None),
-            (Kind::LBracket, TokenValue::None),
-            (Kind::RBracket, TokenValue::None),
-            (Kind::Assign, TokenValue::None),
-            (Kind::Dot, TokenValue::None),
-            (Kind::Comma, TokenValue::None),
-            (Kind::Colon, TokenValue::None),
-            (Kind::Semicolon, TokenValue::None),
-            (Kind::Eof, TokenValue::None),
+            (Kind::Symbol, TokenValue::None),
+            (Kind::Symbol, TokenValue::None),
+            (Kind::Symbol, TokenValue::None),
+            (Kind::Symbol, TokenValue::None),
+            (Kind::Symbol, TokenValue::None),
+            (Kind::Symbol, TokenValue::None),
+            (Kind::Symbol, TokenValue::None),
+            (Kind::Symbol, TokenValue::None),
+            (Kind::Symbol, TokenValue::None),
+            (Kind::Symbol, TokenValue::None),
+            (Kind::Symbol, TokenValue::None),
+            (Kind::Symbol, TokenValue::None),
+            (Kind::Symbol, TokenValue::None),
+            (Kind::Symbol, TokenValue::None),
+            (Kind::Symbol, TokenValue::None),
+            (Kind::Symbol, TokenValue::None),
+            (Kind::Symbol, TokenValue::None),
+            (Kind::Symbol, TokenValue::None),
         ];
 
         for (i, token) in tokens.iter().enumerate() {

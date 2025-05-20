@@ -1,11 +1,11 @@
-use st::{Node, NodeKind};
 use error::SyntaxError;
+use st::{Node, NodeKind};
 
 use crate::scan::scan3::{self, Kind, Lexer, Token};
 
-mod st;
 mod error;
 mod first_set;
+mod st;
 
 pub(crate) type SyntaxResult = std::result::Result<Node, SyntaxError>;
 
@@ -56,7 +56,7 @@ pub struct Parser<'a> {
 
 impl<'a> Parser<'a> {
     pub fn new(mut lexer: Lexer<'a>) -> Self {
-        let init_token = lexer.read_next_token();
+        let init_token = lexer.next_token();
         Self {
             lexer,
             lookahead: init_token,
@@ -76,7 +76,7 @@ impl<'a> Parser<'a> {
         if self.match_token(kind) {
             self.cur_token = kind;
             let current = self.lookahead.clone();
-            self.lookahead = self.lexer.read_next_token();
+            self.lookahead = self.lexer.next_token();
             println!("consume token: {:?}, lookahead: {:?}", kind, self.lookahead);
             Ok(Node::new(NodeKind::Token(current), None))
         } else {
