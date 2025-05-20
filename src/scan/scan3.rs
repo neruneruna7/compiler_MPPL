@@ -22,133 +22,76 @@ pub enum TokenValue {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Kind {
-    Eof,
     Name,
-    UnsignedInteger,
+    Keyword,
+    UnsignedInt,
     String,
-    // 以下キーワード
-    Program,
-    Var,
-    Array,
-    Of,
-    Begin,
-    End,
-    If,
-    Then,
-    Else,
-    Procedure,
-    Return,
-    Call,
-    While,
-    DO,
-    Not,
-    Or,
-    Div,
-    And,
-    Char,
-    Integer,
-    Boolean,
-    Read,
-    Write,
-    Readln,
-    Writeln,
-    True,
-    False,
-    Break,
-    // 以下記号
-    Plus,
-    Minus,
-    Star,
-    Equal,
-    NotEq,
-    Less,
-    LessEq,
-    Great,
-    GreatEq,
-    LParen,
-    RParen,
-    LBracket,
-    RBracket,
-    Assign,
-    Dot,
-    Comma,
-    Colon,
-    Semicolon,
-    // どれでもない
-    Unknown,
+    Symbol,
 }
 
 /// キーワードとKindの対応を保持するマップを作成
 /// matchで総当たりしてもいいが，こっちの方が速そう
-static KEYWORDS: LazyLock<HashMap<Vec<char>, Kind>> = LazyLock::new(|| {
+static KEYWORDS: LazyLock<HashSet<Vec<char>>> = LazyLock::new(|| {
     [
-        ("program", Kind::Program),
-        ("var", Kind::Var),
-        ("array", Kind::Array),
-        ("of", Kind::Of),
-        ("begin", Kind::Begin),
-        ("end", Kind::End),
-        ("if", Kind::If),
-        ("then", Kind::Then),
-        ("else", Kind::Else),
-        ("procedure", Kind::Procedure),
-        ("return", Kind::Return),
-        ("call", Kind::Call),
-        ("while", Kind::While),
-        ("do", Kind::DO),
-        ("not", Kind::Not),
-        ("or", Kind::Or),
-        ("div", Kind::Div),
-        ("and", Kind::And),
-        ("char", Kind::Char),
-        ("integer", Kind::Integer),
-        ("boolean", Kind::Boolean),
-        ("read", Kind::Read),
-        ("write", Kind::Write),
-        ("readln", Kind::Readln),
-        ("writeln", Kind::Writeln),
-        ("true", Kind::True),
-        ("false", Kind::False),
-        ("break", Kind::Break),
+        "program",
+        "var",
+        "array",
+        "of",
+        "begin",
+        "end",
+        "if",
+        "then",
+        "else",
+        "procedure",
+        "return",
+        "call",
+        "while",
+        "do",
+        "not",
+        "or",
+        "div",
+        "and",
+        "char",
+        "integer",
+        "boolean",
+        "read",
+        "write",
+        "readln",
+        "writeln",
+        "true",
+        "false",
+        "break",
     ]
     .into_iter()
-    .map(|(k, v)| (k.chars().collect(), v))
+    .map(|k| k.chars().collect())
     .collect()
 });
 
-fn match_keyword(ident: &[char]) -> Kind {
-    KEYWORDS.get(ident).copied().unwrap_or(Kind::Name)
+fn match_keyword(ident: &[char]) -> Option<Kind> {
+    if KEYWORDS.contains(ident) {
+        Some(Kind::Keyword)
+    } else {
+        None
+    }
 }
 
 // 記号とKindの対応を保持するマップを作成
-static SYMBOLS: LazyLock<HashMap<Vec<char>, Kind>> = LazyLock::new(|| {
+static SYMBOLS: LazyLock<HashSet<Vec<char>>> = LazyLock::new(|| {
     [
-        ("+", Kind::Plus),
-        ("-", Kind::Minus),
-        ("*", Kind::Star),
-        ("=", Kind::Equal),
-        ("<>", Kind::NotEq),
-        ("<", Kind::Less),
-        ("<=", Kind::LessEq),
-        (">", Kind::Great),
-        (">=", Kind::GreatEq),
-        ("(", Kind::LParen),
-        (")", Kind::RParen),
-        ("[", Kind::LBracket),
-        ("]", Kind::RBracket),
-        (":=", Kind::Assign),
-        (".", Kind::Dot),
-        (",", Kind::Comma),
-        (":", Kind::Colon),
-        (";", Kind::Semicolon),
+        "+", "-", "*", "=", "<>", "<", "<=", ">", ">=", "(", ")", "[", "]", ":=", ".", ",", ":",
+        ";",
     ]
     .into_iter()
-    .map(|(k, v)| (k.chars().collect(), v))
+    .map(|k| k.chars().collect())
     .collect()
 });
 
-fn match_symbol(symbol: &[char]) -> Kind {
-    SYMBOLS.get(symbol).copied().unwrap_or(Kind::Unknown)
+fn match_symbol(symbol: &[char]) -> Option<Kind> {
+    if SYMBOLS.contains(symbol) {
+        Some(Kind::Symbol)
+    } else {
+        None
+    }
 }
 
 pub struct Lexer<'a> {
@@ -188,18 +131,18 @@ impl<'a> Lexer<'a> {
         let mut token_vec = Vec::new();
         loop {
             let token = self.next_token();
-            if token.kind == Kind::Eof {
-                token_vec.push(token);
-                break;
-            } else {
-                token_vec.push(token);
+            match token {
+                Some(token) => {
+                    token_vec.push(token);
+                }
+                None => break,
             }
         }
         token_vec
     }
 
-    pub fn next_token(&mut self) -> Token {
-        self.program()
+    pub fn next_token(&mut self) -> Option<Token> {
+        Some(self.program())
     }
 
     /// EBNFのprogramに該当
@@ -211,8 +154,7 @@ impl<'a> Lexer<'a> {
             match c {
                 // 分離子
                 ' ' | '\t' | '\n' | '\r' | '{' | '/' => {
-                    let c = self.next_char().unwrap();
-                    self.comment(c);
+                    self.separator();
                 }
                 // 字句
                 _ => {
@@ -238,6 +180,20 @@ impl<'a> Lexer<'a> {
 
         Token {
             kind: Kind::Eof,
+            start,
+            end,
+            value: TokenValue::None,
+        }
+    }
+
+    fn separator(&mut self) -> Token {
+        // EBNFのseparatorに該当
+        let start = self.position;
+        let c = self.next_char().unwrap();
+        self.comment(c);
+        let end = self.position;
+        Token {
+            kind: Kind::Separator,
             start,
             end,
             value: TokenValue::None,
