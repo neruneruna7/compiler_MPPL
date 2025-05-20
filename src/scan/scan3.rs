@@ -164,85 +164,117 @@ impl<'a> Lexer<'a> {
         None
     }
 
-    fn separator(&mut self) -> Token {
-        // EBNFのseparatorに該当
-        let start = self.position;
-        loop {
-            let c = self.next_char().unwrap();
-            match c {
-                ' ' | '\t' | '\n' | '\r' => {
-                    // 空白，タブ，改行はスキップ
-                    continue;
-                }
-                '{' | '/' => {
-                    // コメント
-                    self.comment(c);
-                    break;
-                }
-                _ => {
-                    unreachable!()
-                }
-            }
-        }
-        let end = self.position;
-        Token {
-            kind: Kind::Unknown,
-            start,
-            end,
-            value: TokenValue::None,
-        }
+    /// EBNFのseparatorに該当
+    fn separator(&mut self) -> Option<Token> {
+        todo!()
     }
-
-    // コメント周りがおかしくてエラーになる可能性？ コメントの部分をトークン進められていない？
-    /// EBNFのcomment，注釈に該当
-    fn comment(&mut self, c: char) {
-        match c {
-            '{' => {
-                self.comment_brace();
-            }
-            '/' => {
-                self.comment_slashstar();
-            }
-            _ => {}
-        }
-    }
-    fn comment_brace(&mut self) {
-        while let Some(c) = self.next_char() {
-            if c == '}' {
-                break;
-            }
-        }
-    }
-
-    fn comment_slashstar(&mut self) {
+    fn comment(&mut self) -> Option<Token> {
+        // { comment } または /* comment */ を処理する有限オートマトン
         enum State {
-            Slash,
-            Star,
-            Other,
+            Initial,       // 初期状態
+            Brace,         // { を読んだ後
+            Slash,         // / を読んだ後
+            SlashStar,     // /* を読んだ後（コメント内）
+            StarInComment, // /*...* の状態（終了 '/' を待っている）
         }
-        let mut state = State::Slash;
+
+        let mut state = State::Initial;
+        let mut buf = Vec::new();
+        let start = self.position;
+
         while let Some(c) = self.next_char() {
             match state {
+                State::Initial => {
+                    match c {
+                        '{' => state = State::Brace,
+                        '/' => state = State::Slash,
+                        ' ' | '\t' | '\n' | '\r' => (), // ホワイトスペースは無視
+                        _ => {
+                            unreachable!()
+                        }
+                    }
+                }
+                State::Brace => {
+                    if c == '}' {
+                        // 波括弧コメントの終了 - コメントを処理完了
+                        return Some(Token {
+                            kind: Kind::Unknown,
+                            start,
+                            end: self.position,
+                            value: TokenValue::String(buf),
+                        });
+                    } else {
+                        // コメント内容を収集（オプション）
+                        buf.push(c);
+                    }
+                }
                 State::Slash => {
                     if c == '*' {
-                        state = State::Star;
+                        state = State::SlashStar;
+                    } else {
+                        unreachable!()
                     }
                 }
-                State::Star => {
-                    if c == '/' {
-                        break;
-                    } else if c != '*' {
-                        state = State::Other;
-                    }
-                }
-                State::Other => {
+                State::SlashStar => {
                     if c == '*' {
-                        state = State::Star;
+                        state = State::StarInComment;
+                    } else {
+                        // コメント内容を収集（オプション）
+                        buf.push(c);
                     }
+                }
+                State::StarInComment => {
+                    if c == '/' {
+                        // スラッシュスターコメントの終了 - コメントを処理したので None を返す
+                        return Some(Token {
+                            kind: Kind::Unknown,
+                            start,
+                            end: self.position,
+                            value: TokenValue::String(buf),
+                        });
+                    } else if c != '*' {
+                        // '*'が連続している場合は、StarInComment状態を維持
+                        // それ以外はコメント内に戻る
+                        buf.push(c);
+                        state = State::SlashStar;
+                    }
+                    // '*'の場合はStarInComment状態を維持
                 }
             }
         }
-    }
+
+        // ファイル終端に達した場合（適切に閉じられていないコメント）
+        // 未閉じのコメントはエラーとして扱う
+        None
+    } // fn comment_slashstar(&mut self) {
+      //     enum State {
+      //         Slash,
+      //         Star,
+      //         Other,
+      //     }
+      //     let mut state = State::Slash;
+      //     while let Some(c) = self.next_char() {
+      //         match state {
+      //             State::Slash => {
+      //                 if c == '*' {
+      //                     state = State::Star;
+      //                 }
+      //             }
+      //             State::Star => {
+      //                 if c == '/' {
+      //                     break;
+      //                 } else if c != '*' {
+      //                     state = State::Other;
+      //                 }
+      //             }
+      //             State::Other => {
+      //                 if c == '*' {
+      //                     state = State::Star;
+      //                 }
+      //             }
+      //         }
+      //     }
+      // }
 
     /// EBNFのtoken，字句に該当
     fn token(&mut self) -> Option<Token> {
@@ -421,6 +453,34 @@ impl<'a> Lexer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_comment1() {
+        let source = "{ comment }";
+        let mut lexer = Lexer::new(source);
+        let token = lexer.comment().unwrap();
+        assert_eq!(token.kind, Kind::Unknown);
+        assert_eq!(token.start, 0);
+        assert_eq!(token.end, 11);
+        assert_eq!(
+            token.value,
+            TokenValue::String(" comment ".chars().collect())
+        );
+    }
+
+    #[test]
+    fn test_comment2() {
+        let source = "/* comment */";
+        let mut lexer = Lexer::new(source);
+        let token = lexer.comment().unwrap();
+        assert_eq!(token.kind, Kind::Unknown);
+        assert_eq!(token.start, 0);
+        assert_eq!(token.end, 13);
+        assert_eq!(
+            token.value,
+            TokenValue::String(" comment ".chars().collect())
+        );
+    }
 
     #[test]
     fn test_lexer() {
